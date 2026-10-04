@@ -2,24 +2,33 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use App\Models\User;
+use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
-    /**
-     * Seed the application's database.
-     */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        // 1. Buat ADMIN
+        User::create([
+            'name' => 'Admin HavenKicks',
+            'email' => 'admin@havenkicks.com',
+            'password' => 'admin123',
+            'role' => 'admin'
         ]);
+
+        // 2. Buat USER Pembeli
+        User::create([
+            'name' => 'customer',
+            'email' => 'customer@gmail.com',
+            'password' => 'user12345',
+            'role' => 'user'
+        ]);
+
+        // 3. (Opsional) Buat Categories Default biar tidak input manual
+        \App\Models\Category::create(['name' => 'Nike']);
+        \App\Models\Category::create(['name' => 'Adidas']);
+        \App\Models\Category::create(['name' => 'New Balance']);
     }
 }
