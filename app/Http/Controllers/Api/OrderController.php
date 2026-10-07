@@ -45,6 +45,7 @@ class OrderController extends Controller
                 'price' => (int) $cart->product->price,
             ]);
             $cart->variant->decrement('stock', $cart->quantity);
+            $cart->product->decrement('stock', $cart->quantity);
             $item_details[] = [
                 'id' => $cart->product_id,
                 'price' => (int) $cart->product->price,
@@ -55,10 +56,11 @@ class OrderController extends Controller
         \App\Models\Cart::where('user_id', $request->user()->id)->delete();
 
         // === INTEGRASI MIDTRANS DIMULAI DISINI ===
-        Config::$serverKey = env('MIDTRANS_SERVER_KEY');
-        Config::$isProduction = false;
-        Config::$isSanitized = true;
-        Config::$is3ds = true;
+        Config::$serverKey = config('midtrans.server_key');
+        Config::$clientKey = config('midtrans.client_key');
+        Config::$isProduction = config('midtrans.is_production');
+        Config::$isSanitized = config('midtrans.is_sanitized');
+        Config::$is3ds = config('midtrans.is_3ds');
 
         $params = [
             'transaction_details' => [
@@ -89,5 +91,39 @@ class OrderController extends Controller
 
     public function index(Request $request){
         return Order::with('items.product')->where('user_id', $request->user()->id)->latest()->get();
+    }
+
+    public function cancel(Request $request, $id)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthorized, token tidak valid'], 401);
+        }
+
+        $order = Order::with('items')->where('id', $id)
+                    ->where('user_id', $user->id)
+                    ->first();
+
+        if (!$order) {
+            return response()->json(['message' => 'Order tidak ditemukan'], 404);
+        }
+
+        if ($order->status !== 'pending') {
+            return response()->json(['message' => 'Order sudah diproses: '.$order->status], 400);
+        }
+
+        DB::transaction(function () use ($order) {
+            foreach ($order->items as $item) {
+                if (!empty($item->product_variant_id)) {
+                    \App\Models\ProductVariant::where('id', $item->product_variant_id)
+                        ->increment('stock', $item->quantity);
+                }
+                \App\Models\Product::where('id', $item->product_id)
+                    ->increment('stock', $item->quantity);
+            }
+            $order->update(['status' => 'canceled']);
+        });
+
+        return response()->json(['message' => 'Order dibatalkan, stok dikembalikan', 'order' => $order->fresh()->load('items')]);
     }
 }

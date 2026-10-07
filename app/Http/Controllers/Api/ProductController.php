@@ -27,7 +27,6 @@ class ProductController extends Controller
             'gallery.*' => 'image|mimes:jpg,jpeg,png|max:2048',
         ]);
 
-        // FIX 1: Simpan thumbnail dulu
         $imagePath = null;
         if ($request->hasFile('image')) {
             $imagePath = $request->file('image')->store('products', 'public');
@@ -41,10 +40,9 @@ class ProductController extends Controller
             'discount_percent' => $request->discount_percent ?? 0,
             'stock' => $request->stock,
             'rating' => 0,
-            'image' => $imagePath, // FIX 2: Masukkan ke DB
+            'image' => $imagePath,
         ]);
 
-        // Handle variants (support JSON string dari form-data)
         if($request->has('variants')){
             $variants = $request->variants;
             if(is_string($variants)) $variants = json_decode($variants, true);
@@ -65,7 +63,6 @@ class ProductController extends Controller
             }
         }
 
-        // FIX 3: Load images juga biar kelihatan
         return response()->json($product->load(['category','variants','images']), 201);
     }
 
@@ -79,7 +76,13 @@ class ProductController extends Controller
         $request->validate([
             'name' => 'sometimes|required',
             'price' => 'sometimes|numeric',
-            'stock' => 'sometimes|integer',
+            'original_price' => 'sometimes|numeric',
+            'discount_percent' => 'sometimes|integer|min:0|max:100',
+            'stock' => 'sometimes|integer|min:0',
+            'category_id' => 'sometimes|exists:categories,id',
+            'variants' => 'sometimes|array',
+            'variants.*.size' => 'required_with:variants|string',
+            'variants.*.stock' => 'required_with:variants|integer|min:0',
             'image' => 'sometimes|nullable|image|mimes:jpg,jpeg,png|max:2048',
             'gallery' => 'sometimes|nullable|array',
             'gallery.*' => 'image|mimes:jpg,jpeg,png|max:2048',
@@ -97,17 +100,20 @@ class ProductController extends Controller
             'category_id','name','price','original_price','discount_percent','stock','rating'
         ]));
 
+        // FIX UTAMA: jangan delete, tapi updateOrCreate biar tidak tabrakan sama order_items
         if($request->has('variants')){
             $variants = $request->variants;
             if(is_string($variants)) $variants = json_decode($variants, true);
             if(is_array($variants)){
-                $product->variants()->delete();
                 foreach($variants as $v){
-                    $product->variants()->create([
-                        'size' => $v['size'],
-                        'stock' => $v['stock']
-                    ]);
+                    $product->variants()->updateOrCreate(
+                        ['size' => $v['size']], // kunci pencariannya size
+                        ['stock' => $v['stock']]
+                    );
                 }
+                // OPTIONAL: kalau mau stok induk otomatis = total varian
+                // $total = $product->variants()->sum('stock');
+                // $product->update(['stock' => $total]);
             }
         }
 
@@ -123,6 +129,11 @@ class ProductController extends Controller
 
     public function destroy(Product $product)
     {
+        // Cegah hapus kalau sudah ada order
+        if ($product->variants()->whereHas('orderItems')->exists()) {
+            return response()->json(['message' => 'Gagal hapus: produk ini sudah ada di order, tidak bisa dihapus.'], 422);
+        }
+
         if ($product->image && Storage::disk('public')->exists($product->image)) {
             Storage::disk('public')->delete($product->image);
         }
